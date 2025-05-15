@@ -318,6 +318,7 @@ def clean_confluence_filename(filename):
     - "My-Page-Title_12345678.html" becomes "my-page-title.html"
     - "1-Introduction_12345678.html" becomes "1-introduction.html"
     - "2.1-Section-Title_12345678.html" becomes "2.1-section-title.html"
+    - "6.4.-Distribution_35985762.html" becomes "6.4-distribution.html" (removes trailing dot)
     """
     # Get the filename without extension
     basename, ext = os.path.splitext(filename)
@@ -331,9 +332,12 @@ def clean_confluence_filename(filename):
     cleaned = re.sub(r'-\d+$', '', cleaned)  # Remove trailing -12345
     cleaned = re.sub(r'_\d+$', '', cleaned)  # Remove trailing _12345
     
-    # Special handling for section numbering
-    # Identify if the filename starts with a section number pattern like 1, 2.1, 3.4.5, etc.
-    section_match = re.match(r'^(\d+(?:\.\d+)*)-', cleaned)
+    # Special handling for section numbering with trailing dots
+    # First, look for formats like "6.4." (with trailing dot) and fix them
+    cleaned = re.sub(r'(\d+(?:\.\d+)*)\.-', r'\1-', cleaned)
+    
+    # Now the regular section number check after fixes
+    section_match = re.match(r'^(\d+(?:\.\d+)*)-(.+)$', cleaned)
     section_prefix = ""
     if section_match:
         # Save the section number including dots
@@ -549,7 +553,13 @@ def clean_title(title_text):
         "SNOMED CT Starter Guide:",
         "Data Analytics with SNOMED CT :",
         "Data Analytics with SNOMED CT",
-        "Data Analytics with SNOMED CT:"
+        "Data Analytics with SNOMED CT:",
+        "URI Standard :",
+        "URI Standard",
+        "URI Standard:",
+        "Reference Sets Practical Guide :",
+        "Reference Sets Practical Guide",
+        "Reference Sets Practical Guide:"
     ]
     
     # Check for exact prefix matches
@@ -596,6 +606,7 @@ def get_section_path(filename, title_mapping=None, subsection_counts=None):
     basename, ext = os.path.splitext(filename)
     
     # Check if this is a section/subsection file
+    # Make sure to check for traditional section patterns as well as those with trailing dots
     section_match = re.match(r'^(\d+(?:\.\d+)*)-(.+)$', basename)
     if not section_match:
         # No section numbering, keep in root
@@ -710,10 +721,12 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping
         # For numeric-only filenames, use the title instead
         if is_numeric_id and title_text:
             # Extract section number if present
-            section_match = re.search(r'(\d+(?:\.\d+)*)\s+(.+)', title_text)
+            section_match = re.search(r'^(?:(?:\d+(?:\.\d+)*)|(?:\d+(?:\.\d+)*\.))[\s\-:]+(.+)', title_text)
             if section_match:
-                section_num = section_match.group(1)
-                section_title = section_match.group(2)
+                # Extract the section number, handling both formats like "6.4" and "6.4."
+                section_parts = title_text.split()
+                section_num = section_parts[0].rstrip('.')  # Remove trailing dot if present
+                section_title = section_match.group(1)
                 # Create filename from section number and title
                 md_file_name = f"{section_num}-{section_title}.md"
             else:

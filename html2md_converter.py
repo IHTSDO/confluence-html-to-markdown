@@ -559,7 +559,10 @@ def clean_title(title_text):
         "URI Standard:",
         "Reference Sets Practical Guide :",
         "Reference Sets Practical Guide",
-        "Reference Sets Practical Guide:"
+        "Reference Sets Practical Guide:",
+        "Snap2SNOMED User Guide :",
+        "Snap2SNOMED User Guide",
+        "Snap2SNOMED User Guide:"
     ]
     
     # Check for exact prefix matches

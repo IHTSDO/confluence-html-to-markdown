@@ -296,26 +296,41 @@ def clean_confluence_html(soup):
 
 def clean_confluence_filename(filename):
     """
-    Clean Confluence export filenames by removing page IDs and other junk.
+    Clean Confluence export filenames by removing page IDs and other junk,
+    while preserving section numbering format (e.g., 1, 2.1, 5.3.2, etc.)
     Examples: 
     - "12345678-My-Page-Title.html" becomes "my-page-title.html"
     - "My-Page-Title-12345678.html" becomes "my-page-title.html"
     - "My-Page-Title_12345678.html" becomes "my-page-title.html"
+    - "1-Introduction_12345678.html" becomes "1-introduction.html"
+    - "2.1-Section-Title_12345678.html" becomes "2.1-section-title.html"
     """
     # Get the filename without extension
     basename, ext = os.path.splitext(filename)
     
-    # Remove page ID prefix (digits and dash at the beginning)
-    cleaned = re.sub(r'^\d+-', '', basename)
+    # Remove page ID prefix (digits and dash at the beginning, but not if it's a chapter number)
+    # We want to preserve "1-" or "2-" at the beginning, but remove "12345-"
+    # Only remove if there are 5 or more digits at the beginning
+    cleaned = re.sub(r'^(\d{5,})-', '', basename)
     
     # Remove page ID suffix (dash/underscore and digits at the end)
     cleaned = re.sub(r'-\d+$', '', cleaned)  # Remove trailing -12345
     cleaned = re.sub(r'_\d+$', '', cleaned)  # Remove trailing _12345
     
+    # Special handling for section numbering
+    # Identify if the filename starts with a section number pattern like 1, 2.1, 3.4.5, etc.
+    section_match = re.match(r'^(\d+(?:\.\d+)*)-', cleaned)
+    section_prefix = ""
+    if section_match:
+        # Save the section number including dots
+        section_prefix = section_match.group(1)
+        # Remove it from the string for now (we'll add it back later)
+        cleaned = cleaned[len(section_prefix) + 1:]  # +1 for the hyphen
+    
     # Convert to lowercase and replace spaces/underscores with hyphens
     cleaned = cleaned.lower().replace('_', '-').replace(' ', '-')
     
-    # Remove any other invalid characters
+    # Remove any other invalid characters, but preserve dots for file extensions
     cleaned = re.sub(r'[^a-z0-9-]', '', cleaned)
     
     # Remove multiple consecutive hyphens
@@ -325,8 +340,12 @@ def clean_confluence_filename(filename):
     cleaned = cleaned.strip('-')
     
     # Make sure we have a non-empty filename
-    if not cleaned:
+    if not cleaned and not section_prefix:
         cleaned = "page"
+    
+    # Add back the section prefix if it existed
+    if section_prefix:
+        cleaned = section_prefix + "-" + cleaned
     
     # Add back the extension
     return cleaned + ext

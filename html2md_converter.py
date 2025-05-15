@@ -538,42 +538,12 @@ def clean_markdown(md_content):
 def clean_title(title_text):
     """
     Clean up the title by removing repeated site titles and Confluence suffix.
-    Examples:
-    - "SNOMED CT Starter Guide : 5. SNOMED CT Logical Model" -> "5. SNOMED CT Logical Model"
-    - "Data Analytics with SNOMED CT : Introduction to Data Analytics" -> "Introduction to Data Analytics"
-    - "Site Title - Page Title - Confluence" -> "Page Title"
+    Uses pattern detection rather than hardcoded prefixes for greater flexibility.
     """
     # First remove Confluence suffix
     title_text = re.sub(r'\s*-\s*Confluence.*$', '', title_text.strip())
     
-    # Define common site title prefixes to remove (exact matches)
-    common_prefixes = [
-        "SNOMED CT Starter Guide", 
-        "SNOMED CT Starter Guide :",
-        "SNOMED CT Starter Guide:",
-        "Data Analytics with SNOMED CT :",
-        "Data Analytics with SNOMED CT",
-        "Data Analytics with SNOMED CT:",
-        "URI Standard :",
-        "URI Standard",
-        "URI Standard:",
-        "Reference Sets Practical Guide :",
-        "Reference Sets Practical Guide",
-        "Reference Sets Practical Guide:",
-        "Snap2SNOMED User Guide :",
-        "Snap2SNOMED User Guide",
-        "Snap2SNOMED User Guide:"
-    ]
-    
-    # Check for exact prefix matches
-    for prefix in common_prefixes:
-        if title_text.startswith(prefix):
-            cleaned_title = title_text[len(prefix):].strip()
-            # Remove any leading colon or dash with spaces
-            cleaned_title = re.sub(r'^[\s:|-]+', '', cleaned_title)
-            return cleaned_title
-    
-    # For other patterns, look for common separators
+    # Look for common title patterns with separators like ":" or "-"
     site_title_match = re.search(r'^(.+?)(?:\s*[:|-]\s+)(.+)$', title_text)
     if site_title_match:
         site_title, page_title = site_title_match.groups()
@@ -587,7 +557,14 @@ def clean_title(title_text):
             return page_title.strip()
             
         # Rule 3: If site title matches known patterns (e.g., ends with "Guide", "Documentation", etc.)
-        if re.search(r'(guide|docs|documentation|manual|handbook|analytics)$', site_title.lower()):
+        if re.search(r'(guide|docs|documentation|manual|handbook|reference|standard|user guide|starter)(?:\s+|$)', 
+                    site_title.lower()):
+            return page_title.strip()
+            
+        # Rule 4: If the site title follows a "Product Name + Content Type" pattern
+        # For example: "Product Analytics with X" or "X Starter Guide"
+        if re.search(r'(?:with|for|using|in)\s+\w+\s*$', site_title.lower()) or \
+           re.search(r'^\w+(?:\s+\w+)?\s+(?:guide|standard|reference|docs)$', site_title.lower()):
             return page_title.strip()
     
     return title_text

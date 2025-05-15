@@ -42,16 +42,26 @@ def setup_html2text():
     
     return h
 
-def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path):
+def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path, folder_depth=0):
     """
     Process images by replacing them with placeholders in the HTML,
     and return a mapping of placeholders to processed image HTML.
     
     This allows us to preserve the original image positions in the document.
+    
+    Args:
+        soup: BeautifulSoup object with the HTML content
+        html_file_path: Path to the HTML file being processed
+        output_dir: Base output directory
+        rel_path: Relative path of the HTML file
+        folder_depth: How many folder levels deep the output file will be
     """
     html_dir = os.path.dirname(html_file_path)
     image_map = {}
     image_count = 0
+    
+    # Calculate relative path to images based on folder depth
+    image_rel_prefix = "../" * folder_depth if folder_depth > 0 else ""
     
     # First handle img tags directly in HTML
     for img in soup.find_all('img'):
@@ -105,8 +115,8 @@ def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path)
         if os.path.isfile(src_path):
             try:
                 shutil.copy2(src_path, dest_path)
-                # Create the image HTML with updated path
-                new_src = os.path.join('images', img_rel_path).replace('\\', '/')
+                # Create the image HTML with updated path adjusted for folder depth
+                new_src = os.path.join(image_rel_prefix + 'images', img_rel_path).replace('\\', '/')
                 image_html = f'<img src="{new_src}" alt="{alt}" title="{title}" style="width: 100%;">'
                 image_map[placeholder] = image_html
             except (shutil.Error, IOError) as e:
@@ -134,6 +144,10 @@ def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path)
                 placeholder = f"__IMAGE_PLACEHOLDER_{image_count}__"
                 alt_text = match.group(1)
                 img_src = match.group(2)
+                
+                # Adjust image path based on folder depth
+                if not img_src.startswith(('http://', 'https://')):
+                    img_src = image_rel_prefix + img_src
                 
                 # Create HTML image tag
                 image_html = f'<img src="{img_src}" alt="{alt_text}" style="width: 100%;">'
@@ -561,7 +575,108 @@ def clean_title(title_text):
     
     return title_text
 
-def convert_html_to_markdown(html_file_path, output_dir, rel_path):
+def get_section_path(filename, title_mapping=None, subsection_counts=None):
+    """
+    Determine the correct folder structure and file path based on section numbering.
+    Will create proper nested folder structure for subsections with multiple files,
+    while avoiding unnecessary folders for isolated files.
+    
+    Args:
+        filename: The cleaned markdown filename
+        title_mapping: Dictionary mapping section numbers to titles
+        subsection_counts: Dictionary tracking how many pages are in each subsection
+    
+    Returns a tuple of (folder_path, file_name, folder_depth)
+    """
+    # Get filename without extension
+    basename, ext = os.path.splitext(filename)
+    
+    # Check if this is a section/subsection file
+    section_match = re.match(r'^(\d+(?:\.\d+)*)-(.+)$', basename)
+    if not section_match:
+        # No section numbering, keep in root
+        return "", filename, 0
+    
+    section_number = section_match.group(1)
+    section_title = section_match.group(2)
+    
+    # Split the section number to get hierarchy (e.g., "4.3.1" → ["4", "3", "1"])
+    parts = section_number.split('.')
+    
+    # Top-level section always gets a folder
+    main_section_number = parts[0]
+    main_section_title = title_mapping.get(main_section_number, section_title if len(parts) == 1 else "section")
+    main_folder = f"{main_section_number} {main_section_title}"
+    
+    # For single-part sections (e.g., "4-logical-design.md"), it becomes README.md
+    if len(parts) == 1:
+        return main_folder, "README.md", 1
+    
+    # Initialize folder structure
+    folder_path = main_folder
+    folder_depth = 1
+    current_section = main_section_number
+    level_title = main_section_title  # Initialize to avoid UnboundLocalError
+    has_subsections = False            # Initialize to avoid UnboundLocalError
+    is_leaf = True                     # Default value if we don't enter the loop
+    
+    # Build the folder path recursively for each level of the section hierarchy
+    for i in range(1, len(parts)):
+        # Get section number up to this level (e.g., "4.2" or "4.3.1")
+        current_section = '.'.join(parts[:i+1])
+        
+        # Check if this is the terminal (leaf) part of the section number
+        is_leaf = (i == len(parts) - 1)
+        
+        # Get the section count for the current section (how many files exist at this exact level)
+        section_count = subsection_counts.get(current_section, 0) if subsection_counts else 0
+        
+        # Look ahead to check if we have any deeper subsections
+        has_subsections = False
+        if subsection_counts:
+            prefix = current_section + "."
+            for section in subsection_counts:
+                if section.startswith(prefix):
+                    has_subsections = True
+                    break
+        
+        # If this is a leaf section (e.g., 4.2.1 with no further subsections like 4.2.1.1),
+        # and it's the only file at this level, we don't need a separate folder for it
+        if is_leaf and section_count <= 1 and not has_subsections:
+            # Just place this file in the parent folder
+            break
+        
+        # Otherwise we need a folder for this level
+        level_title = title_mapping.get(current_section, "section")
+        subfolder = f"{current_section} {level_title}"
+        folder_path = os.path.join(folder_path, subfolder)
+        folder_depth += 1
+    
+    # Determine the file name based on if it's a "README" or a regular file
+    if is_leaf:
+        # This is the final part of the section number (e.g., the "3" in "4.2.3")
+        if parts[-1] == "1" and len(parts) > 1:
+            # Special handling for "*.*.1" files
+            if has_subsections:
+                # If this is like "4.2.1" and has subsections like "4.2.1.1", it should be README.md
+                file_name = "README.md"
+            else:
+                # Otherwise, it's a regular file
+                file_name = f"{section_number}-{section_title}.md"
+        else:
+            # For sections not ending in "1" (like "4.2"), they become README.md
+            # if the folder exists for them
+            if folder_path.endswith(f"{current_section} {level_title}"):
+                file_name = "README.md"
+            else:
+                file_name = f"{section_number}-{section_title}.md"
+    else:
+        # We broke out of the loop early - this is a file that doesn't need its own folder
+        file_name = f"{section_number}-{section_title}.md"
+    
+    return folder_path, file_name, folder_depth
+
+def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping=None, subsection_counts=None):
     """Convert an HTML file to Markdown and save it to the output directory."""
     try:
         with open(html_file_path, 'r', encoding='utf-8') as f:
@@ -581,8 +696,15 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path):
         # Clean Confluence-specific elements
         soup = clean_confluence_html(soup)
         
+        # Determine output path and folder depth before processing images
+        original_filename = os.path.basename(html_file_path)
+        md_file_name = clean_confluence_filename(os.path.splitext(original_filename)[0] + '.md')
+        
+        # Determine folder structure based on section numbers
+        folder_path, file_name, folder_depth = get_section_path(md_file_name, title_mapping, subsection_counts)
+        
         # Process images and replace with placeholders
-        soup, image_map = process_images_with_placeholders(soup, html_file_path, output_dir, rel_path)
+        soup, image_map = process_images_with_placeholders(soup, html_file_path, output_dir, rel_path, folder_depth)
         
         # Convert to Markdown
         h = setup_html2text()
@@ -598,12 +720,14 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path):
         if title:
             md_content = title + md_content
         
-        # Create output path with cleaned filename
-        original_filename = os.path.basename(html_file_path)
-        md_file_name = clean_confluence_filename(os.path.splitext(original_filename)[0] + '.md')
-        md_dir = os.path.join(output_dir, os.path.dirname(rel_path))
+        # Create full output path
+        if folder_path:
+            md_dir = os.path.join(output_dir, folder_path)
+        else:
+            md_dir = os.path.join(output_dir, os.path.dirname(rel_path))
+        
         os.makedirs(md_dir, exist_ok=True)
-        md_file_path = os.path.join(md_dir, md_file_name)
+        md_file_path = os.path.join(md_dir, file_name)
         
         # Write Markdown content
         with open(md_file_path, 'w', encoding='utf-8') as f:
@@ -626,6 +750,41 @@ def process_directory(input_dir, output_dir):
     # Track conversion stats
     stats = {'processed': 0, 'success': 0, 'failed': 0}
     
+    # First pass: build a mapping of section numbers to titles
+    # and count how many files are in each subsection
+    title_mapping = {}
+    subsection_counts = {}
+    section_files = {}
+    
+    for html_file in input_path.glob('**/*.html'):
+        # Get the filename without extension
+        basename = os.path.splitext(os.path.basename(html_file))[0]
+        
+        # Clean up the filename to get the section number and title
+        cleaned_filename = clean_confluence_filename(basename + '.md')
+        cleaned_basename = os.path.splitext(cleaned_filename)[0]
+        
+        # Check if this is a section file
+        section_match = re.match(r'^(\d+(?:\.\d+)*)-(.+)$', cleaned_basename)
+        if section_match:
+            section_number = section_match.group(1)
+            section_title = section_match.group(2)
+            title_mapping[section_number] = section_title
+            
+            # Group files by section number for later processing
+            if section_number not in section_files:
+                section_files[section_number] = []
+            section_files[section_number].append(html_file)
+            
+            # Count subsections
+            parts = section_number.split('.')
+            for i in range(len(parts)):
+                # We need to count how many files are at each exact level
+                # (e.g., how many files have section number exactly "4.2")
+                level_section = '.'.join(parts[:i+1])
+                subsection_counts[level_section] = subsection_counts.get(level_section, 0) + 1
+    
+    # Second pass: convert the files with title information
     for html_file in input_path.glob('**/*.html'):
         stats['processed'] += 1
         
@@ -635,7 +794,7 @@ def process_directory(input_dir, output_dir):
             rel_path = ''
         
         # Convert the file
-        success = convert_html_to_markdown(str(html_file), output_dir, rel_path)
+        success = convert_html_to_markdown(str(html_file), output_dir, rel_path, title_mapping, subsection_counts)
         if success:
             stats['success'] += 1
         else:

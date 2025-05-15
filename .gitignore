@@ -1,2 +1,6 @@
 .vscode/settings.json
 .DS_Store
+example/
+output/
+.vscode/
+venv/

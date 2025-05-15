@@ -69,7 +69,7 @@ def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path)
         
         # Skip external images, just update the placeholder
         if src.startswith(('http://', 'https://')):
-            image_html = f'<img src="{src}" alt="{alt}" title="{title}" width="{width}" height="{height}">'
+            image_html = f'<img src="{src}" alt="{alt}" title="{title}" style="width: 100%;">'
             image_map[placeholder] = image_html
             placeholder_tag = soup.new_tag('div')
             placeholder_tag.string = placeholder
@@ -107,17 +107,17 @@ def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path)
                 shutil.copy2(src_path, dest_path)
                 # Create the image HTML with updated path
                 new_src = os.path.join('images', img_rel_path).replace('\\', '/')
-                image_html = f'<img src="{new_src}" alt="{alt}" title="{title}" width="{width}" height="{height}">'
+                image_html = f'<img src="{new_src}" alt="{alt}" title="{title}" style="width: 100%;">'
                 image_map[placeholder] = image_html
             except (shutil.Error, IOError) as e:
                 print(f"Error copying image {src_path}: {e}")
                 # Keep original path in case of error
-                image_html = f'<img src="{src}" alt="{alt}" title="{title}" width="{width}" height="{height}">'
+                image_html = f'<img src="{src}" alt="{alt}" title="{title}" style="width: 100%;">'
                 image_map[placeholder] = image_html
         else:
             print(f"Warning: Image file not found: {src_path}")
             # Keep original path if file not found
-            image_html = f'<img src="{src}" alt="{alt}" title="{title}" width="{width}" height="{height}">'
+            image_html = f'<img src="{src}" alt="{alt}" title="{title}" style="width: 100%;">'
             image_map[placeholder] = image_html
         
         # Replace image with placeholder in the HTML
@@ -136,7 +136,7 @@ def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path)
                 img_src = match.group(2)
                 
                 # Create HTML image tag
-                image_html = f'<img src="{img_src}" alt="{alt_text}">'
+                image_html = f'<img src="{img_src}" alt="{alt_text}" style="width: 100%;">'
                 image_map[placeholder] = image_html
                 
                 # Replace in the text
@@ -146,16 +146,80 @@ def process_images_with_placeholders(soup, html_file_path, output_dir, rel_path)
 
 def replace_image_placeholders(markdown_content, image_map):
     """Replace image placeholders in markdown with the actual image HTML."""
-    for placeholder, image_html in image_map.items():
-        # Make sure no dashes are added after the image replacement
-        # This prevents the "---" horizontal rule after images
-        markdown_content = markdown_content.replace(placeholder + '\n---', placeholder)
-        markdown_content = markdown_content.replace(placeholder + '\n----', placeholder)
+    # Split the content into lines to detect captions
+    lines = markdown_content.split('\n')
+    
+    # Process lines to find image placeholders and potential captions
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         
-        # Now replace the placeholder with the image
-        markdown_content = markdown_content.replace(placeholder, image_html)
+        # Check if this line contains an image placeholder
+        placeholder_match = None
+        for placeholder in image_map.keys():
+            if placeholder in line:
+                placeholder_match = placeholder
+                break
         
-    return markdown_content
+        if placeholder_match:
+            # Get the image HTML
+            image_html = image_map[placeholder_match]
+            
+            # Check if there are subsequent lines for caption text
+            caption_text = ""
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j].strip()
+                # Skip empty lines
+                if not next_line:
+                    j += 1
+                    continue
+                
+                # Skip if the next line is a heading, horizontal rule, another image, or table
+                if (next_line.startswith('#') or 
+                    re.match(r'^-{3,}$', next_line) or 
+                    '<img' in next_line or 
+                    any(p in next_line for p in image_map.keys()) or
+                    next_line.startswith('|')):
+                    break
+                
+                # Found potential caption text
+                caption_text = next_line
+                
+                # Convert markdown formatting to HTML tags instead of removing it
+                # Convert __text__ or **text** to <strong>text</strong>
+                caption_text = re.sub(r'(__|\*\*)([^_*]+)(__|\*\*)', r'<strong>\2</strong>', caption_text)
+                
+                # Convert _text_ or *text* to <em>text</em>
+                caption_text = re.sub(r'(_|\*)([^_*]+)(_|\*)', r'<em>\2</em>', caption_text)
+                
+                # Remove the caption line
+                lines.pop(j)
+                break
+                
+            # Fix image tag to remove duplicate style
+            image_html = re.sub(r' style="width: 100%;"', '', image_html, count=1)
+            
+            # Wrap in figure tag with caption if available
+            if caption_text:
+                figure_html = f'<figure>{image_html}<figcaption><p>{caption_text}</p></figcaption></figure>'
+            else:
+                figure_html = f'<figure>{image_html}</figure>'
+            
+            # Replace the placeholder line with the figure
+            lines[i] = lines[i].replace(placeholder_match, figure_html)
+        
+        i += 1
+    
+    # Join lines back into content
+    processed_content = '\n'.join(lines)
+    
+    # Make sure no dashes are added after the image replacement
+    # This prevents the "---" horizontal rule after images
+    processed_content = re.sub(r'<figure>.*?</figure>\n---', lambda m: m.group(0).replace('\n---', ''), processed_content, flags=re.DOTALL)
+    processed_content = re.sub(r'<figure>.*?</figure>\n----', lambda m: m.group(0).replace('\n----', ''), processed_content, flags=re.DOTALL)
+    
+    return processed_content
 
 def clean_confluence_html(soup):
     """Remove Confluence-specific elements from the HTML."""
@@ -292,43 +356,43 @@ def clean_markdown(md_content):
             i += 1
             continue
         
-        # Check for image followed by horizontal rule (---)
-        if '<img src=' in line and i + 1 < len(lines) and re.match(r'^-{3,}\s*$', lines[i+1].strip()):
-            # Add the image line without the horizontal rule
+        # Check for image or figure followed by horizontal rule (---)
+        if ('<img src=' in line or '<figure>' in line) and i + 1 < len(lines) and re.match(r'^-{3,}\s*$', lines[i+1].strip()):
+            # Add the image/figure line without the horizontal rule
             cleaned_lines.append(line)
             # Skip the horizontal rule line
             i += 2
             continue
 
-        # Check for image inside a table with | markers that gets followed by horizontal rule
-        if '|' in line and '<img src=' in line and i + 1 < len(lines) and re.match(r'^-{3,}\s*$', lines[i+1].strip()):
-            # Extract just the image tag from the line
-            img_match = re.search(r'<img src=[^>]+>', line)
+        # Check for image/figure inside a table with | markers that gets followed by horizontal rule
+        if '|' in line and ('<img src=' in line or '<figure>' in line) and i + 1 < len(lines) and re.match(r'^-{3,}\s*$', lines[i+1].strip()):
+            # Extract just the image/figure tag from the line
+            img_match = re.search(r'<(img src=[^>]+|figure>.*?</figure)>', line, re.DOTALL)
             if img_match:
-                # Replace the line with just the image
+                # Replace the line with just the image/figure
                 cleaned_lines.append(img_match.group(0))
             else:
-                # If we can't extract the image, keep the original line
+                # If we can't extract the image/figure, keep the original line
                 cleaned_lines.append(line)
             # Skip the horizontal rule line
             i += 2
             continue
         
-        # Clean up lines that contain only an image with table formatting (| prefix)
+        # Clean up lines that contain only an image/figure with table formatting (| prefix)
         # while preserving blank lines before and after
-        if re.match(r'^\s*\|\s*<img\s+src=.*>\s*$', line):
+        if re.match(r'^\s*\|\s*(<img\s+src=.*>|<figure>.*?</figure>)\s*$', line, re.DOTALL):
             # Check if the previous line was blank and preserve it
             if i > 0 and not lines[i-1].strip() and (len(cleaned_lines) == 0 or cleaned_lines[-1] != ''):
                 # Make sure we don't add duplicate blank lines
                 cleaned_lines.append('')
             
-            # Extract just the image tag
-            img_match = re.search(r'<img[^>]+>', line)
+            # Extract just the image/figure tag
+            img_match = re.search(r'<(img[^>]+>|figure>.*?</figure>)', line, re.DOTALL)
             if img_match:
-                # Replace the line with just the image
-                cleaned_lines.append(img_match.group(0))
+                # Replace the line with just the image/figure
+                cleaned_lines.append('<' + img_match.group(1))
             else:
-                # If we can't extract the image, keep the original line
+                # If we can't extract the image/figure, keep the original line
                 cleaned_lines.append(line)
             
             # Check if the next line is blank and preserve it
@@ -344,9 +408,45 @@ def clean_markdown(md_content):
             i += 1
             continue
             
-        # Convert any Markdown-style image links to HTML img tags
-        # Pattern: ![alt text](image.jpg) -> <img src="image.jpg" alt="alt text">
-        line = re.sub(r'!\[(.*?)\]\((.*?)\)', r'<img src="\2" alt="\1">', line)
+        # Convert any Markdown-style image links to HTML img tags with figure wrapper
+        # Pattern: ![alt text](image.jpg) -> <figure><img src="image.jpg" alt="alt text" style="width: 100%;"></figure>
+        if re.search(r'!\[.*?\]\(.*?\)', line):
+            # Find the first non-empty, non-heading, non-image line after this one for caption
+            caption_text = ""
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j].strip()
+                # Skip empty lines
+                if not next_line:
+                    j += 1
+                    continue
+                
+                # Skip if the next line is a heading, horizontal rule, another image, or table
+                if (next_line.startswith('#') or 
+                    re.match(r'^-{3,}$', next_line) or 
+                    '![' in next_line or 
+                    '<img' in next_line or
+                    next_line.startswith('|')):
+                    break
+                
+                # Found potential caption text
+                caption_text = next_line
+                
+                # Convert markdown formatting to HTML tags instead of removing it
+                # Convert __text__ or **text** to <strong>text</strong>
+                caption_text = re.sub(r'(__|\*\*)([^_*]+)(__|\*\*)', r'<strong>\2</strong>', caption_text)
+                
+                # Convert _text_ or *text* to <em>text</em>
+                caption_text = re.sub(r'(_|\*)([^_*]+)(_|\*)', r'<em>\2</em>', caption_text)
+                
+                # Remove the caption line from the original list
+                lines.pop(j)
+                break
+            
+            if caption_text:
+                line = re.sub(r'!\[(.*?)\]\((.*?)\)', r'<figure><img src="\2" alt="\1" style="width: 100%;"><figcaption><p>' + caption_text + r'</p></figcaption></figure>', line)
+            else:
+                line = re.sub(r'!\[(.*?)\]\((.*?)\)', r'<figure><img src="\2" alt="\1" style="width: 100%;"></figure>', line)
         
         cleaned_lines.append(line)
         i += 1
@@ -358,21 +458,43 @@ def clean_markdown(md_content):
     cleaned_md = re.sub(r'\n{3,}', '\n\n', cleaned_md)
     
     # Convert any remaining Markdown image links that might span multiple lines
-    cleaned_md = re.sub(r'!\[(.*?)\]\((.*?)\)', r'<img src="\2" alt="\1">', cleaned_md, flags=re.DOTALL)
+    # No caption handling here since this is a final fallback for any remaining markdown images
+    cleaned_md = re.sub(r'!\[(.*?)\]\((.*?)\)', r'<figure><img src="\2" alt="\1" style="width: 100%;"></figure>', cleaned_md, flags=re.DOTALL)
     
-    # Clean up any remaining cases of image followed by horizontal rule
-    cleaned_md = re.sub(r'(<img[^>]+>)\s*\n\s*[-]{3,}', r'\1', cleaned_md)
+    # Clean up any remaining cases of image/figure followed by horizontal rule
+    cleaned_md = re.sub(r'(<img[^>]+>|<figure>.*?</figure>)\s*\n\s*[-]{3,}', r'\1', cleaned_md)
     
-    # Final pass to clean up any remaining table-formatted images while preserving spacing
-    # This regex now preserves blank lines before and after the image
-    cleaned_md = re.sub(r'(^|\n\n)\s*\|\s*(<img[^>]+>)\s*$', r'\1\2', cleaned_md, flags=re.MULTILINE)
+    # Final pass to clean up any remaining table-formatted images/figures while preserving spacing
+    # This regex now preserves blank lines before and after the image/figure
+    cleaned_md = re.sub(r'(^|\n\n)\s*\|\s*(<img[^>]+>|<figure>.*?</figure>)\s*$', r'\1\2', cleaned_md, flags=re.MULTILINE)
     
-    # Ensure images have proper spacing (blank line before and after)
-    # First, find standalone image lines that don't have a blank line before
-    cleaned_md = re.sub(r'([^\n])\n(<img[^>]+>)', r'\1\n\n\2', cleaned_md)
+    # Ensure images and figures have proper spacing (blank line before and after)
+    # First, find standalone image/figure lines that don't have a blank line before
+    cleaned_md = re.sub(r'([^\n])\n(<img[^>]+>|<figure>)', r'\1\n\n\2', cleaned_md)
     
-    # Then find standalone image lines that don't have a blank line after
-    cleaned_md = re.sub(r'(<img[^>]+>)\n([^\n])', r'\1\n\n\2', cleaned_md)
+    # Then find standalone image/figure lines that don't have a blank line after
+    cleaned_md = re.sub(r'(<img[^>]+>|</figure>)\n([^\n])', r'\1\n\n\2', cleaned_md)
+    
+    # Fix any img tags that are not wrapped in figure tags
+    img_pattern = re.compile(r'<img\s([^>]*?)(?:style="[^"]*")?([^>]*)>', re.DOTALL)
+    
+    def replace_img(match):
+        img_attrs = match.group(1) + match.group(2)
+        return f'<figure><img {img_attrs} style="width: 100%;"></figure>'
+    
+    # Only replace img tags that are not already inside figure tags
+    parts = re.split(r'(<figure>.*?</figure>)', cleaned_md, flags=re.DOTALL)
+    result_parts = []
+    
+    for part in parts:
+        if part.startswith('<figure>'):
+            # This part already has figure tags, leave it as is
+            result_parts.append(part)
+        else:
+            # Replace standalone img tags with figure-wrapped tags
+            result_parts.append(img_pattern.sub(replace_img, part))
+    
+    cleaned_md = ''.join(result_parts)
     
     return cleaned_md
 

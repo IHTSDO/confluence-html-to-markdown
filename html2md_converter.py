@@ -536,6 +536,7 @@ def clean_title(title_text):
     Clean up the title by removing repeated site titles and Confluence suffix.
     Examples:
     - "SNOMED CT Starter Guide : 5. SNOMED CT Logical Model" -> "5. SNOMED CT Logical Model"
+    - "Data Analytics with SNOMED CT : Introduction to Data Analytics" -> "Introduction to Data Analytics"
     - "Site Title - Page Title - Confluence" -> "Page Title"
     """
     # First remove Confluence suffix
@@ -545,7 +546,10 @@ def clean_title(title_text):
     common_prefixes = [
         "SNOMED CT Starter Guide", 
         "SNOMED CT Starter Guide :",
-        "SNOMED CT Starter Guide:"
+        "SNOMED CT Starter Guide:",
+        "Data Analytics with SNOMED CT :",
+        "Data Analytics with SNOMED CT",
+        "Data Analytics with SNOMED CT:"
     ]
     
     # Check for exact prefix matches
@@ -570,7 +574,7 @@ def clean_title(title_text):
             return page_title.strip()
             
         # Rule 3: If site title matches known patterns (e.g., ends with "Guide", "Documentation", etc.)
-        if re.search(r'(guide|docs|documentation|manual|handbook)$', site_title.lower()):
+        if re.search(r'(guide|docs|documentation|manual|handbook|analytics)$', site_title.lower()):
             return page_title.strip()
     
     return title_text
@@ -687,6 +691,7 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping
         
         # Extract title if available
         title = ""
+        title_text = ""
         title_tag = soup.find('title')
         if title_tag and title_tag.string:
             # Clean the title text
@@ -698,7 +703,28 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping
         
         # Determine output path and folder depth before processing images
         original_filename = os.path.basename(html_file_path)
-        md_file_name = clean_confluence_filename(os.path.splitext(original_filename)[0] + '.md')
+        
+        # Check if filename is just a numeric ID
+        is_numeric_id = re.match(r'^\d+\.html$', original_filename) is not None
+        
+        # For numeric-only filenames, use the title instead
+        if is_numeric_id and title_text:
+            # Extract section number if present
+            section_match = re.search(r'(\d+(?:\.\d+)*)\s+(.+)', title_text)
+            if section_match:
+                section_num = section_match.group(1)
+                section_title = section_match.group(2)
+                # Create filename from section number and title
+                md_file_name = f"{section_num}-{section_title}.md"
+            else:
+                # No section number, just use the title
+                md_file_name = f"{title_text}.md"
+            
+            # Clean up the generated filename
+            md_file_name = clean_confluence_filename(md_file_name)
+        else:
+            # Normal case: use the original filename
+            md_file_name = clean_confluence_filename(os.path.splitext(original_filename)[0] + '.md')
         
         # Determine folder structure based on section numbers
         folder_path, file_name, folder_depth = get_section_path(md_file_name, title_mapping, subsection_counts)

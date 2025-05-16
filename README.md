@@ -1,6 +1,6 @@
-# Confluence HTML to Markdown Converter
+# Confluence HTML to GitBook Markdown Directory Converter
 
-This script converts a directory structure of HTML files exported from Atlassian Confluence into clean Markdown format, preserving the directory structure, organizing content hierarchically, and properly handling image references.
+This script converts a directory structure of HTML files exported from Atlassian Confluence into clean Markdown format, preserving the directory structure, organizing content hierarchically, and properly handling image references. The target format has been built around synchronising git repositories with document spaces in **GitBook**, https://www.gitbook.com/, but it could probably be used for other services.
 
 ## Features
 
@@ -16,6 +16,7 @@ This script converts a directory structure of HTML files exported from Atlassian
 - Ensures all images display at full width with `style="width: 100%;"`
 - Extracts page titles and adds them as Markdown headings
 - Removes "- Confluence" suffix from page titles
+- Automatically detects and removes common title prefixes (e.g., "Project Name:" or "Documentation Title:") across all pages
 
 ## Section Organization
 
@@ -64,6 +65,17 @@ The script creates a logical folder structure matching your documentation hierar
   - "My-Page-12345678.html" becomes "my-page.md"
 - Preserves section numbers in filenames:
   - "4.3.2-Reference-Sets_57815107.html" becomes "4.3.2 reference-sets/README.md"
+- Identifies and removes common title prefixes (like "Compositional Grammar:" or "Project Guide:") that appear across multiple pages
+
+## Title Cleaning
+
+The script performs multiple levels of title cleaning:
+
+1. **Global prefix detection**: Identifies common prefixes used across all pages (e.g., "Project Name: ", "Documentation Title: ")
+2. **Individual title cleaning**: Applies rules to each title to remove repetitive elements
+3. **Suffix removal**: Removes standard suffixes like "- Confluence"
+
+This ensures consistent and clean headings throughout your documentation.
 
 ## Requirements
 
@@ -98,13 +110,15 @@ python html2md_converter.py ./confluence_export ./markdown_output
 
 This will:
 1. Scan the `./confluence_export` directory for HTML files
-2. Clean up Confluence-specific elements
-3. Convert each HTML file to Markdown
-4. Organize content into a hierarchical folder structure based on section numbering
-5. Create README.md files for section and subsection main pages
-6. Copy all images to `./markdown_output/images/`
-7. Update image references in the Markdown files with proper relative paths
-8. Wrap images in figure tags with captions
+2. Analyze all titles to identify common prefixes
+3. Clean up Confluence-specific elements
+4. Convert each HTML file to Markdown, removing identified title prefixes
+5. Organize content into a hierarchical folder structure based on section numbering
+6. Create README.md files for section and subsection main pages
+7. Copy all images to `./markdown_output/images/`
+8. Update image references in the Markdown files with proper relative paths
+9. Wrap images in figure tags with captions
+10. Report the common prefixes that were removed
 
 ## Notes
 
@@ -121,4 +135,5 @@ You can modify the following parts of the script to adjust the conversion:
 - `clean_confluence_filename()`: Adjust filename cleaning logic
 - `get_section_path()`: Modify the folder structure and file organization logic
 - `setup_html2text()`: Change HTML to Markdown conversion settings 
-- `process_images_with_placeholders()`: Adjust image handling and styling 
+- `process_images_with_placeholders()`: Adjust image handling and styling
+- `find_common_title_prefix()`: Modify how common prefixes are detected (e.g., change the 50% threshold) 

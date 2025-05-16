@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Confluence HTML to Markdown Directory Converter
+Confluence HTML to GitBook Markdown Directory Converter
 
 This script converts a directory structure of HTML files (exported from Confluence)
 into clean Markdown, preserving the directory structure and handling images correctly.

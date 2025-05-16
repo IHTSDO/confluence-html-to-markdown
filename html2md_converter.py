@@ -19,6 +19,11 @@ from bs4 import BeautifulSoup
 import html2text
 import argparse
 import urllib.parse
+from collections import Counter
+
+# Track common prefixes across all titles
+common_prefixes = Counter()
+removed_prefix = None
 
 def setup_html2text():
     """Configure html2text with appropriate settings."""
@@ -368,6 +373,71 @@ def clean_confluence_filename(filename):
     # Add back the extension
     return cleaned + ext
 
+def find_common_title_prefix(titles):
+    """
+    Find common prefix across all titles.
+    Returns the prefix and its frequency if it appears in enough titles.
+    """
+    # Extract potential prefixes with separators like ":" or "-"
+    prefix_candidates = []
+    for title in titles:
+        match = re.search(r'^(.+?)(?:\s*[:|-]\s+)(.+)$', title)
+        if match:
+            prefix = match.group(1).strip()
+            prefix_candidates.append(prefix)
+    
+    # Count occurrences of each prefix
+    prefix_counter = Counter(prefix_candidates)
+    
+    # Find most common prefix that appears in at least 50% of titles
+    if prefix_candidates:
+        most_common = prefix_counter.most_common(1)[0]
+        prefix, count = most_common
+        if count >= len(titles) * 0.5 and len(prefix) > 0:
+            return prefix, count
+    
+    return None, 0
+
+def clean_title(title_text, global_prefix=None):
+    """
+    Clean up the title by removing repeated site titles and Confluence suffix.
+    Uses both global prefix detection and pattern detection for greater flexibility.
+    """
+    # First remove Confluence suffix
+    title_text = re.sub(r'\s*-\s*Confluence.*$', '', title_text.strip())
+    
+    # Remove identified global prefix if present
+    if global_prefix and title_text.startswith(global_prefix):
+        separator_match = re.search(f'^{re.escape(global_prefix)}\\s*[:|-]\\s+', title_text)
+        if separator_match:
+            return title_text[len(separator_match.group(0)):].strip()
+    
+    # Look for common title patterns with separators like ":" or "-"
+    site_title_match = re.search(r'^(.+?)(?:\s*[:|-]\s+)(.+)$', title_text)
+    if site_title_match:
+        site_title, page_title = site_title_match.groups()
+        
+        # Rule 1: If site title is less than 30% of the full title length
+        if len(site_title) < len(title_text) * 0.3:
+            return page_title.strip()
+            
+        # Rule 2: If site title appears multiple times in the document
+        if site_title.lower() in page_title.lower():
+            return page_title.strip()
+            
+        # Rule 3: If site title matches known patterns (e.g., ends with "Guide", "Documentation", etc.)
+        if re.search(r'(guide|docs|documentation|manual|handbook|reference|standard|user guide|starter)(?:\s+|$)', 
+                    site_title.lower()):
+            return page_title.strip()
+            
+        # Rule 4: If the site title follows a "Product Name + Content Type" pattern
+        # For example: "Product Analytics with X" or "X Starter Guide"
+        if re.search(r'(?:with|for|using|in)\s+\w+\s*$', site_title.lower()) or \
+           re.search(r'^\w+(?:\s+\w+)?\s+(?:guide|standard|reference|docs)$', site_title.lower()):
+            return page_title.strip()
+    
+    return title_text
+
 def clean_markdown(md_content):
     """Clean up the markdown output by removing empty headings and other artifacts."""
     # Remove lines that are just # with no content
@@ -535,40 +605,6 @@ def clean_markdown(md_content):
     
     return cleaned_md
 
-def clean_title(title_text):
-    """
-    Clean up the title by removing repeated site titles and Confluence suffix.
-    Uses pattern detection rather than hardcoded prefixes for greater flexibility.
-    """
-    # First remove Confluence suffix
-    title_text = re.sub(r'\s*-\s*Confluence.*$', '', title_text.strip())
-    
-    # Look for common title patterns with separators like ":" or "-"
-    site_title_match = re.search(r'^(.+?)(?:\s*[:|-]\s+)(.+)$', title_text)
-    if site_title_match:
-        site_title, page_title = site_title_match.groups()
-        
-        # Rule 1: If site title is less than 30% of the full title length
-        if len(site_title) < len(title_text) * 0.3:
-            return page_title.strip()
-            
-        # Rule 2: If site title appears multiple times in the document
-        if site_title.lower() in page_title.lower():
-            return page_title.strip()
-            
-        # Rule 3: If site title matches known patterns (e.g., ends with "Guide", "Documentation", etc.)
-        if re.search(r'(guide|docs|documentation|manual|handbook|reference|standard|user guide|starter)(?:\s+|$)', 
-                    site_title.lower()):
-            return page_title.strip()
-            
-        # Rule 4: If the site title follows a "Product Name + Content Type" pattern
-        # For example: "Product Analytics with X" or "X Starter Guide"
-        if re.search(r'(?:with|for|using|in)\s+\w+\s*$', site_title.lower()) or \
-           re.search(r'^\w+(?:\s+\w+)?\s+(?:guide|standard|reference|docs)$', site_title.lower()):
-            return page_title.strip()
-    
-    return title_text
-
 def get_section_path(filename, title_mapping=None, subsection_counts=None):
     """
     Determine the correct folder structure and file path based on section numbering.
@@ -671,7 +707,7 @@ def get_section_path(filename, title_mapping=None, subsection_counts=None):
     
     return folder_path, file_name, folder_depth
 
-def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping=None, subsection_counts=None):
+def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping=None, subsection_counts=None, global_prefix=None):
     """Convert an HTML file to Markdown and save it to the output directory."""
     try:
         with open(html_file_path, 'r', encoding='utf-8') as f:
@@ -685,8 +721,9 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping
         title_text = ""
         title_tag = soup.find('title')
         if title_tag and title_tag.string:
-            # Clean the title text
-            title_text = clean_title(title_tag.string)
+            # Clean the title text using both global prefix and regular cleaning
+            original_title = title_tag.string
+            title_text = clean_title(original_title, global_prefix)
             title = f"# {title_text}\n\n"
         
         # Clean Confluence-specific elements
@@ -759,8 +796,21 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping
         print(f"Error converting {html_file_path}: {e}")
         return False
 
+def extract_titles_from_html(html_file_path):
+    """Extract the title from an HTML file."""
+    try:
+        with open(html_file_path, 'r', encoding='utf-8') as f:
+            soup = BeautifulSoup(f.read(), 'html.parser')
+            title_tag = soup.find('title')
+            if title_tag and title_tag.string:
+                return title_tag.string.strip()
+    except Exception as e:
+        print(f"Error extracting title from {html_file_path}: {e}")
+    return None
+
 def process_directory(input_dir, output_dir):
     """Process all HTML files in the input directory and its subdirectories."""
+    global removed_prefix
     input_path = Path(input_dir)
     
     # Create images directory in the output
@@ -769,7 +819,20 @@ def process_directory(input_dir, output_dir):
     # Track conversion stats
     stats = {'processed': 0, 'success': 0, 'failed': 0}
     
-    # First pass: build a mapping of section numbers to titles
+    # First pass: collect all titles to identify common prefixes
+    all_titles = []
+    for html_file in input_path.glob('**/*.html'):
+        title = extract_titles_from_html(str(html_file))
+        if title:
+            all_titles.append(title)
+    
+    # Identify common prefix across titles
+    global_prefix, prefix_count = find_common_title_prefix(all_titles)
+    if global_prefix:
+        removed_prefix = global_prefix
+        print(f"Identified common title prefix: '{global_prefix}' (found in {prefix_count} of {len(all_titles)} titles)")
+    
+    # Second pass: build a mapping of section numbers to titles
     # and count how many files are in each subsection
     title_mapping = {}
     subsection_counts = {}
@@ -803,7 +866,7 @@ def process_directory(input_dir, output_dir):
                 level_section = '.'.join(parts[:i+1])
                 subsection_counts[level_section] = subsection_counts.get(level_section, 0) + 1
     
-    # Second pass: convert the files with title information
+    # Third pass: convert the files with title information and global prefix
     for html_file in input_path.glob('**/*.html'):
         stats['processed'] += 1
         
@@ -813,7 +876,8 @@ def process_directory(input_dir, output_dir):
             rel_path = ''
         
         # Convert the file
-        success = convert_html_to_markdown(str(html_file), output_dir, rel_path, title_mapping, subsection_counts)
+        success = convert_html_to_markdown(str(html_file), output_dir, rel_path, 
+                                          title_mapping, subsection_counts, global_prefix)
         if success:
             stats['success'] += 1
         else:
@@ -842,6 +906,10 @@ def main():
     print(f"Files processed: {stats['processed']}")
     print(f"Successful conversions: {stats['success']}")
     print(f"Failed conversions: {stats['failed']}")
+    
+    # Report removed prefix
+    if removed_prefix:
+        print(f"\nRemoved common title prefix: '{removed_prefix}'")
 
 if __name__ == "__main__":
     main() 

@@ -35,7 +35,7 @@ def has_any_feedback_link(filepath: str) -> bool:
 
 def remove_content_from_file(filepath: str, content_to_remove: str) -> bool:
     """
-    Remove specific content from a file.
+    Remove specific content from a file, including preceding newlines that were added with it.
     
     Returns: True if content was found and removed, False otherwise
     """
@@ -43,27 +43,44 @@ def remove_content_from_file(filepath: str, content_to_remove: str) -> bool:
         with open(filepath, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
-        # Find and remove lines containing the content
         content_stripped = content_to_remove.strip()
-        original_count = len(lines)
-        
-        # Remove lines that contain the content (exact match or as substring)
         filtered_lines = []
-        removed_count = 0
+        content_found = False
         
-        for line in lines:
-            line_stripped = line.strip()
-            # Skip empty lines that might have been added with the content
-            if (content_stripped in line_stripped or 
-                line_stripped == content_stripped or
-                (line_stripped == '' and removed_count > 0 and len(filtered_lines) > 0 and filtered_lines[-1].strip() == '')):
-                removed_count += 1
-                # Skip consecutive empty lines after removal
+        i = 0
+        while i < len(lines):
+            line_stripped = lines[i].strip()
+            
+            # Check if this line contains the feedback content
+            if content_stripped in line_stripped or line_stripped == content_stripped:
+                content_found = True
+                
+                # Remove preceding empty lines (up to 10 to handle the 6 newlines + some buffer)
+                # Work backwards from current position to remove empty lines
+                removal_start = i
+                for j in range(i - 1, max(-1, i - 10), -1):
+                    if j >= 0 and lines[j].strip() == '':
+                        removal_start = j
+                    else:
+                        break
+                
+                # Remove lines from removal_start to current position (inclusive)
+                # by not adding them to filtered_lines and skipping ahead
+                if removal_start < len(filtered_lines):
+                    # Remove some lines that were already added to filtered_lines
+                    lines_to_remove = len(filtered_lines) - removal_start
+                    filtered_lines = filtered_lines[:-lines_to_remove]
+                
+                # Skip the content line and any immediate following empty lines
+                i += 1
+                while i < len(lines) and lines[i].strip() == '':
+                    i += 1
                 continue
             else:
-                filtered_lines.append(line)
+                filtered_lines.append(lines[i])
+                i += 1
         
-        if removed_count > 0:
+        if content_found:
             # Write back the filtered content
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.writelines(filtered_lines)
@@ -76,7 +93,7 @@ def remove_content_from_file(filepath: str, content_to_remove: str) -> bool:
 
 def remove_any_feedback_links(filepath: str) -> bool:
     """
-    Remove any feedback links to the Google Form from a file.
+    Remove any feedback links to the Google Form from a file, including preceding newlines.
     
     Returns: True if any feedback links were found and removed, False otherwise
     """
@@ -88,23 +105,42 @@ def remove_any_feedback_links(filepath: str) -> bool:
         feedback_pattern = r'docs\.google\.com/forms/d/e/1FAIpQLScTmbZIf0UEQwYDkY27EEWBkaiYkHSbR0_9DmFrMLXoQLyL7Q.*entry\.1767247133='
         
         filtered_lines = []
-        removed_count = 0
+        content_found = False
         
-        for line in lines:
-            line_stripped = line.strip()
+        i = 0
+        while i < len(lines):
+            line_stripped = lines[i].strip()
             
             # Check if this line contains a feedback link
-            if re.search(feedback_pattern, line):
-                removed_count += 1
-                continue
-            # Also remove empty lines that might have been added with the content
-            elif (line_stripped == '' and removed_count > 0 and 
-                  len(filtered_lines) > 0 and filtered_lines[-1].strip() == ''):
+            if re.search(feedback_pattern, lines[i]):
+                content_found = True
+                
+                # Remove preceding empty lines (up to 10 to handle the 6 newlines + some buffer)
+                # Work backwards from current position to remove empty lines
+                removal_start = i
+                for j in range(i - 1, max(-1, i - 20), -1):
+                    if j >= 0 and lines[j].strip() == '':
+                        removal_start = j
+                    else:
+                        break
+                
+                # Remove lines from removal_start to current position (inclusive)
+                # by not adding them to filtered_lines and skipping ahead
+                if removal_start < len(filtered_lines):
+                    # Remove some lines that were already added to filtered_lines
+                    lines_to_remove = len(filtered_lines) - removal_start
+                    filtered_lines = filtered_lines[:-lines_to_remove]
+                
+                # Skip the content line and any immediate following empty lines
+                i += 1
+                while i < len(lines) and lines[i].strip() == '':
+                    i += 1
                 continue
             else:
-                filtered_lines.append(line)
+                filtered_lines.append(lines[i])
+                i += 1
         
-        if removed_count > 0:
+        if content_found:
             # Write back the filtered content
             with open(filepath, 'w', encoding='utf-8') as f:
                 f.writelines(filtered_lines)
@@ -207,7 +243,7 @@ def process_files(directory: str, line_to_add: str, dry_run: bool = False,
                     
                     if not dry_run:
                         with open(filepath, 'a', encoding='utf-8') as f:
-                            f.write('\n' + line_to_add + '\n')
+                            f.write('\n\n\n\n\n\n' + line_to_add + '\n')
                     
                     print(f"✅ {'Would append to' if dry_run else 'Appended to'} {relative_path}")
                     processed += 1

@@ -120,6 +120,23 @@ This will:
 9. Wrap images in figure tags with captions
 10. Report the common prefixes that were removed
 
+## Additional Tools
+
+### Append Content Tool
+
+This repository includes a powerful utility for managing feedback links across your converted documentation:
+
+📄 **[Append Content Tool Documentation](append-content-tool.md)**
+
+The `append-content.py` script allows you to:
+- Add feedback links to all text files in your documentation
+- Remove specific or all feedback links from files
+- Support dry-run mode to preview changes
+- Filter operations by file patterns (e.g., only HTML files)
+- Handle duplicate detection and smart cleanup
+
+Perfect for adding feedback forms to your converted Confluence documentation or managing feedback links across large document sets.
+
 ## Notes
 
 - External images (URLs starting with http:// or https://) are kept as-is

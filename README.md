@@ -130,10 +130,14 @@ This repository includes a powerful utility for managing feedback links across y
 
 The `append-content.py` script allows you to:
 - Add feedback links to all text files in your documentation
+- **Automatically extract page titles from H1 headers** and include them in feedback URLs
 - Remove specific or all feedback links from files
 - Support dry-run mode to preview changes
 - Filter operations by file patterns (e.g., only HTML files)
 - Handle duplicate detection and smart cleanup
+- **URL-encode page titles** to handle special characters properly
+- **Fallback to filename** when no H1 header is found
+- **Optional page title extraction** with `--no-page-titles` flag
 
 Perfect for adding feedback forms to your converted Confluence documentation or managing feedback links across large document sets.
 

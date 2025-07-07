@@ -6,11 +6,14 @@ A Python script for adding or removing feedback links from text files in a direc
 
 The `append-content.py` script can:
 - **Add feedback links** to all text files in a directory
+- **Automatically extract page titles** from H1 headers and include them in feedback URLs
 - **Remove specific feedback links** that match a document name
 - **Remove all feedback links** regardless of document name
 - Support **dry-run mode** to preview changes
 - Filter files by **pattern matching**
 - Handle **duplicate detection** and **smart cleanup**
+- **URL-encode page titles** to handle special characters properly
+- **Fallback to filename** when no H1 header is found
 
 ## Quick Start
 
@@ -47,6 +50,7 @@ python append-content.py <directory> [options]
 | `--dry-run` | `-n` | Preview changes without modifying files |
 | `--pattern` | `-f` | File pattern to match (e.g., `"*.html"`, `"*.md"`) |
 | `--no-skip-existing` | | Add content even if it already exists (ignored in remove modes) |
+| `--no-page-titles` | | Do not use page titles from H1 headers (use document name only) |
 | `--verbose` | `-v` | Enable detailed output |
 | `--help` | `-h` | Show help message |
 
@@ -65,6 +69,9 @@ python append-content.py /path/to/docs --document-name "My+Custom+Guide"
 
 # Add only to HTML files
 python append-content.py /path/to/docs --pattern "*.html"
+
+# Add without page titles (document name only)
+python append-content.py /path/to/docs --no-page-titles
 ```
 
 **Features:**
@@ -161,6 +168,40 @@ The script automatically processes these text file types:
 - **Logs**: `.log`
 
 Binary files are automatically skipped.
+
+## Page Title Features
+
+The script now automatically extracts page titles from H1 headers in markdown files and includes them in feedback URLs. This provides better context for feedback submissions.
+
+### How Page Titles Work
+
+1. **Automatic Extraction**: The script looks for the first H1 header (`# Title`) in each file
+2. **URL Encoding**: Page titles are properly URL-encoded to handle special characters
+3. **Fallback**: If no H1 header is found, the filename (without extension) is used
+4. **Optional**: Use `--no-page-titles` to disable this feature
+
+### Example URLs Generated
+
+For a file with H1 header `# User Authentication Guide` and document name `Extension+Guide`:
+
+**With page titles (default):**
+```
+https://docs.google.com/forms/d/e/1FAIpQLScTmbZIf0UEQwYDkY27EEWBkaiYkHSbR0_9DmFrMLXoQLyL7Q/viewform?usp=pp_url&entry.1767247133=Extension+Guide&entry.670899847=User+Authentication+Guide
+```
+
+**Without page titles (`--no-page-titles`):**
+```
+https://docs.google.com/forms/d/e/1FAIpQLScTmbZIf0UEQwYDkY27EEWBkaiYkHSbR0_9DmFrMLXoQLyL7Q/viewform?usp=pp_url&entry.1767247133=Extension+Guide
+```
+
+### Page Title Examples
+
+| File Content | Extracted Title | URL Parameter |
+|--------------|-----------------|---------------|
+| `# Getting Started` | `Getting Started` | `entry.670899847=Getting+Started` |
+| `# API Reference v2.1` | `API Reference v2.1` | `entry.670899847=API+Reference+v2.1` |
+| `# User Guide: Authentication` | `User Guide: Authentication` | `entry.670899847=User+Guide%3AAuthentication` |
+| No H1 header | `filename` | `entry.670899847=filename` |
 
 ## Output and Status
 

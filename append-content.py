@@ -4,6 +4,7 @@ import sys
 import re
 from pathlib import Path
 from typing import List, Tuple
+from urllib.parse import quote
 
 def is_text_file(filepath: str) -> bool:
     """Check if a file is likely a text file by checking its extension."""
@@ -151,9 +152,57 @@ def remove_any_feedback_links(filepath: str) -> bool:
     except Exception:
         raise
 
-def process_files(directory: str, line_to_add: str, dry_run: bool = False, 
+def extract_page_title(filepath: str) -> str:
+    """
+    Extract the page title from the first H1 header in a markdown file.
+    
+    Returns: The page title if found, otherwise the filename without extension
+    """
+    try:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        
+        # Look for the first H1 header (starts with # followed by space)
+        for line in lines:
+            line = line.strip()
+            if line.startswith('# '):
+                # Extract the title after the # 
+                title = line[2:].strip()
+                return title
+        
+        # If no H1 header found, use the filename without extension
+        filename = Path(filepath).stem
+        return filename
+        
+    except Exception:
+        # Fallback to filename if there's any error
+        return Path(filepath).stem
+
+def build_feedback_link(document_name: str, page_title: str = None) -> str:
+    """
+    Build the feedback link with the document name and optional page title.
+    
+    Args:
+        document_name: The document name for the feedback form
+        page_title: The page title to add as a parameter (optional)
+    
+    Returns: The complete feedback link HTML
+    """
+    base_url = "https://docs.google.com/forms/d/e/1FAIpQLScTmbZIf0UEQwYDkY27EEWBkaiYkHSbR0_9DmFrMLXoQLyL7Q/viewform?usp=pp_url"
+    params = [f"entry.1767247133={document_name}"]
+    
+    if page_title:
+        # URL encode the page title to handle special characters
+        encoded_title = quote(page_title)
+        params.append(f"entry.670899847={encoded_title}")
+    
+    full_url = f"{base_url}&{'&'.join(params)}"
+    return f'<a href="{full_url}" class="button primary">Provide Feedback</a>'
+
+def process_files(directory: str, document_name: str, dry_run: bool = False, 
                  file_pattern: str = None, skip_existing: bool = True, 
-                 remove_mode: bool = False, remove_all_feedback: bool = False) -> Tuple[int, int, int]:
+                 remove_mode: bool = False, remove_all_feedback: bool = False,
+                 use_page_titles: bool = True) -> Tuple[int, int, int]:
     """
     Process files in directory and append or remove content.
     
@@ -182,12 +231,22 @@ def process_files(directory: str, line_to_add: str, dry_run: bool = False,
             print("🗑️  REMOVE MODE - Deleting specific feedback links from files")
     else:
         print("➕ ADD MODE - Adding feedback links to files")
+        if use_page_titles:
+            print("📄 Using page titles from H1 headers for feedback links")
+        else:
+            print("📄 Using document name only for feedback links")
     print()
     
     for root, _, files in os.walk(directory):
         for filename in files:
             filepath = os.path.join(root, filename)
             relative_path = os.path.relpath(filepath, directory)
+            
+            # Skip README.md and SUMMARY.md files
+            if filename.lower() in ['readme.md', 'summary.md']:
+                print(f"⏭️  Skipped {relative_path} (README.md/SUMMARY.md file)")
+                skipped += 1
+                continue
             
             # Apply file pattern filter if specified
             if file_pattern and not Path(filename).match(file_pattern):
@@ -200,6 +259,13 @@ def process_files(directory: str, line_to_add: str, dry_run: bool = False,
                 continue
             
             try:
+                # Generate the feedback link for this specific file
+                if not (remove_mode or remove_all_feedback):
+                    page_title = None
+                    if use_page_titles:
+                        page_title = extract_page_title(filepath)
+                    line_to_add = build_feedback_link(document_name, page_title)
+                
                 if remove_all_feedback:
                     # Remove all feedback links mode
                     if not has_any_feedback_link(filepath):
@@ -218,16 +284,17 @@ def process_files(directory: str, line_to_add: str, dry_run: bool = False,
                     processed += 1
                     
                 elif remove_mode:
-                    # Remove specific content mode
-                    if not has_content_already(filepath, line_to_add):
-                        print(f"⏭️  Skipped {relative_path} (specific content not found)")
+                    # For remove mode, we need to check for any feedback link with this document name
+                    # Since we can't easily match the exact dynamic link, we'll use a pattern-based approach
+                    if not has_any_feedback_link(filepath):
+                        print(f"⏭️  Skipped {relative_path} (no feedback links found)")
                         skipped += 1
                         continue
                     
                     if not dry_run:
-                        success = remove_content_from_file(filepath, line_to_add)
+                        success = remove_any_feedback_links(filepath)
                         if not success:
-                            print(f"⏭️  Skipped {relative_path} (specific content not found during removal)")
+                            print(f"⏭️  Skipped {relative_path} (no feedback links found during removal)")
                             skipped += 1
                             continue
                     
@@ -235,9 +302,9 @@ def process_files(directory: str, line_to_add: str, dry_run: bool = False,
                     processed += 1
                     
                 else:
-                    # Add mode: existing logic
-                    if skip_existing and has_content_already(filepath, line_to_add):
-                        print(f"⏭️  Skipped {relative_path} (content already exists)")
+                    # Add mode: check if any feedback link already exists
+                    if skip_existing and has_any_feedback_link(filepath):
+                        print(f"⏭️  Skipped {relative_path} (feedback link already exists)")
                         skipped += 1
                         continue
                     
@@ -245,7 +312,8 @@ def process_files(directory: str, line_to_add: str, dry_run: bool = False,
                         with open(filepath, 'a', encoding='utf-8') as f:
                             f.write('\n\n\n\n\n\n' + line_to_add + '\n')
                     
-                    print(f"✅ {'Would append to' if dry_run else 'Appended to'} {relative_path}")
+                    page_info = f" (page: {page_title})" if use_page_titles and page_title else ""
+                    print(f"✅ {'Would append to' if dry_run else 'Appended to'} {relative_path}{page_info}")
                     processed += 1
                 
             except PermissionError:
@@ -263,14 +331,17 @@ def process_files(directory: str, line_to_add: str, dry_run: bool = False,
 def main():
     """Main function to handle command line arguments and coordinate the processing."""
     parser = argparse.ArgumentParser(
-        description='Append or remove feedback links from text files in a directory',
+        description='Append or remove feedback links from text files in a directory. Page titles from H1 headers are automatically included in feedback URLs.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Add feedback links
+  # Add feedback links with page titles from H1 headers
   %(prog)s /path/to/directory
   %(prog)s /path/to/directory --document-name "Custom+Guide+Name"
-  %(prog)s /path/to/directory --dry-run --pattern "*.html"
+  %(prog)s /path/to/directory --dry-run --pattern "*.md"
+  
+  # Add feedback links without page titles (document name only)
+  %(prog)s /path/to/directory --no-page-titles
   
   # Remove specific feedback links (matching document name)
   %(prog)s /path/to/directory --remove
@@ -296,6 +367,8 @@ Examples:
                        help='File pattern to match (e.g., "*.html", "*.md")')
     parser.add_argument('--no-skip-existing', action='store_true',
                        help='Add content even if it already exists in the file (ignored in remove modes)')
+    parser.add_argument('--no-page-titles', action='store_true',
+                       help='Do not use page titles from H1 headers (use document name only)')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Enable verbose output')
     
@@ -310,9 +383,6 @@ Examples:
         print("❌ Error: Cannot use both --remove and --remove-all-feedback at the same time")
         sys.exit(1)
     
-    # Build the line to add/remove
-    line_to_add = f'<a href="https://docs.google.com/forms/d/e/1FAIpQLScTmbZIf0UEQwYDkY27EEWBkaiYkHSbR0_9DmFrMLXoQLyL7Q/viewform?usp=pp_url&#x26;entry.1767247133={args.document_name}" class="button primary">Provide Feedback</a>'
-    
     if args.verbose:
         print(f"🔧 Configuration:")
         print(f"   Directory: {args.directory}")
@@ -326,19 +396,19 @@ Examples:
         print(f"   Pattern: {args.pattern or 'All text files'}")
         if not (args.remove or args.remove_all_feedback):
             print(f"   Skip existing: {not args.no_skip_existing}")
-        if not args.remove_all_feedback:
-            print(f"   Content to {'remove' if args.remove else 'add'}: {line_to_add}")
+            print(f"   Use page titles: {not args.no_page_titles}")
         print()
     
     # Process files
     processed, skipped, errors = process_files(
         directory=args.directory,
-        line_to_add=line_to_add,
+        document_name=args.document_name,
         dry_run=args.dry_run,
         file_pattern=args.pattern,
         skip_existing=not args.no_skip_existing,
         remove_mode=args.remove,
-        remove_all_feedback=args.remove_all_feedback
+        remove_all_feedback=args.remove_all_feedback,
+        use_page_titles=not args.no_page_titles
     )
     
     # Print summary

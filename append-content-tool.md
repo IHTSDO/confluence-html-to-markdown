@@ -19,7 +19,7 @@ The `append-content.py` script can:
 
 ```bash
 # Add feedback links to all text files
-python append-content.py /path/to/directory
+python append-content.py /path/to/directory -d "My+Custom+Guide"
 
 # Remove all feedback links from files
 python append-content.py /path/to/directory --remove-all-feedback
@@ -44,7 +44,7 @@ python append-content.py <directory> [options]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--document-name` | `-d` | Document name for the feedback link (default: `LOINC+Implementation+Guide`) |
+| `--document-name` | `-d` | Document name for the feedback link (default: `SNOMED+Guide`) |
 | `--remove` | `-r` | Remove feedback links matching the specified document name |
 | `--remove-all-feedback` | `-R` | Remove ALL feedback links regardless of document name |
 | `--dry-run` | `-n` | Preview changes without modifying files |

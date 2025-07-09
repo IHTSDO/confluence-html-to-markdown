@@ -243,7 +243,7 @@ def process_files(directory: str, document_name: str, dry_run: bool = False,
             relative_path = os.path.relpath(filepath, directory)
             
             # Skip README.md and SUMMARY.md files
-            if filename.lower() in ['readme.md', 'summary.md']:
+            if filename.lower() in ['index.md', 'summary.md']:
                 print(f"⏭️  Skipped {relative_path} (README.md/SUMMARY.md file)")
                 skipped += 1
                 continue
@@ -355,7 +355,7 @@ Examples:
     )
     
     parser.add_argument('directory', help='Root directory to process')
-    parser.add_argument('--document-name', '-d', default='LOINC+Implementation+Guide', 
+    parser.add_argument('--document-name', '-d', default='SNOMED+Guide', 
                        help='Document name to substitute in the feedback link (default: %(default)s)')
     parser.add_argument('--remove', '-r', action='store_true',
                        help='Remove feedback links that match the specified document name')

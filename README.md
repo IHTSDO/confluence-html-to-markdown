@@ -147,6 +147,7 @@ Perfect for adding feedback forms to your converted Confluence documentation or 
 - The script assumes UTF-8 encoding for HTML files
 - For complex Confluence macros and layouts, some formatting may be simplified
 - Best results are achieved with standard Confluence exports rather than custom themes
+- A lot of the code here was created using [Cursor](https://cursor.com/) and claude-4-sonnet, then tested by humans.
 
 ## Customization
 

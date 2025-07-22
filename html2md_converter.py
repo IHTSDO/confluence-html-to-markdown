@@ -173,60 +173,61 @@ def replace_image_placeholders(markdown_content, image_map):
     while i < len(lines):
         line = lines[i]
         
-        # Check if this line contains an image placeholder
-        placeholder_match = None
+        # Check if this line contains any image placeholders and replace ALL of them
+        placeholders_found = []
         for placeholder in image_map.keys():
             if placeholder in line:
-                placeholder_match = placeholder
-                break
+                placeholders_found.append(placeholder)
         
-        if placeholder_match:
-            # Get the image HTML
-            image_html = image_map[placeholder_match]
-            
-            # Check if there are subsequent lines for caption text
-            caption_text = ""
-            j = i + 1
-            while j < len(lines):
-                next_line = lines[j].strip()
-                # Skip empty lines
-                if not next_line:
-                    j += 1
-                    continue
+        if placeholders_found:
+            # Process each placeholder found on this line
+            for placeholder_match in placeholders_found:
+                # Get the image HTML
+                image_html = image_map[placeholder_match]
                 
-                # Skip if the next line is a heading, horizontal rule, another image, or table
-                if (next_line.startswith('#') or 
-                    re.match(r'^-{3,}$', next_line) or 
-                    '<img' in next_line or 
-                    any(p in next_line for p in image_map.keys()) or
-                    next_line.startswith('|')):
+                # Check if there are subsequent lines for caption text
+                caption_text = ""
+                j = i + 1
+                while j < len(lines):
+                    next_line = lines[j].strip()
+                    # Skip empty lines
+                    if not next_line:
+                        j += 1
+                        continue
+                    
+                    # Skip if the next line is a heading, horizontal rule, another image, or table
+                    if (next_line.startswith('#') or 
+                        re.match(r'^-{3,}$', next_line) or 
+                        '<img' in next_line or 
+                        any(p in next_line for p in image_map.keys()) or
+                        next_line.startswith('|')):
+                        break
+                    
+                    # Found potential caption text
+                    caption_text = next_line
+                    
+                    # Convert markdown formatting to HTML tags instead of removing it
+                    # Convert __text__ or **text** to <strong>text</strong>
+                    caption_text = re.sub(r'(__|\*\*)([^_*]+)(__|\*\*)', r'<strong>\2</strong>', caption_text)
+                    
+                    # Convert _text_ or *text_ to <em>text</em>
+                    caption_text = re.sub(r'(_|\*)([^_*]+)(_|\*)', r'<em>\2</em>', caption_text)
+                    
+                    # Remove the caption line
+                    lines.pop(j)
                     break
+                    
+                # Fix image tag to remove duplicate style
+                image_html = re.sub(r' style="width: 100%;"', '', image_html, count=1)
                 
-                # Found potential caption text
-                caption_text = next_line
+                # Wrap in figure tag with caption if available
+                if caption_text:
+                    figure_html = f'<figure>{image_html}<figcaption><p>{caption_text}</p></figcaption></figure>'
+                else:
+                    figure_html = f'<figure>{image_html}</figure>'
                 
-                # Convert markdown formatting to HTML tags instead of removing it
-                # Convert __text__ or **text** to <strong>text</strong>
-                caption_text = re.sub(r'(__|\*\*)([^_*]+)(__|\*\*)', r'<strong>\2</strong>', caption_text)
-                
-                # Convert _text_ or *text* to <em>text</em>
-                caption_text = re.sub(r'(_|\*)([^_*]+)(_|\*)', r'<em>\2</em>', caption_text)
-                
-                # Remove the caption line
-                lines.pop(j)
-                break
-                
-            # Fix image tag to remove duplicate style
-            image_html = re.sub(r' style="width: 100%;"', '', image_html, count=1)
-            
-            # Wrap in figure tag with caption if available
-            if caption_text:
-                figure_html = f'<figure>{image_html}<figcaption><p>{caption_text}</p></figcaption></figure>'
-            else:
-                figure_html = f'<figure>{image_html}</figure>'
-            
-            # Replace the placeholder line with the figure
-            lines[i] = lines[i].replace(placeholder_match, figure_html)
+                # Replace this specific placeholder in the line
+                lines[i] = lines[i].replace(placeholder_match, figure_html)
         
         i += 1
     
@@ -252,8 +253,8 @@ def clean_confluence_html(soup):
         '#comments-section', '.comments-container', '.likes-and-labels-container',
         '.page-tools', '.ia-secondary-container', '.ia-secondary-content', 
         
-        # Confluence specific classes
-        '.confluence-information-macro', '.contentLayout2', '.columnLayout', '.aui-buttons',
+        # Confluence specific classes (but NOT content layout containers)
+        '.aui-buttons',
         '.ia-fixed-sidebar', '.acs-side-bar', '.ia-secondary-header-title',
         '.ia-secondary-parent-hd', '.analytics-container', '.page-children', 
         '.plugin_pagetree', '.ia-splitter-handle',
@@ -280,6 +281,27 @@ def clean_confluence_html(soup):
                 element.decompose()
         except Exception as e:
             print(f"Error removing {selector}: {e}")
+    
+    # Handle confluence-information-macro more selectively
+    # Remove only navigation-type info macros, keep content-bearing ones
+    for info_macro in soup.find_all(class_='confluence-information-macro'):
+        try:
+            # Check if this is just a navigation macro (like "In this page:")
+            title_elem = info_macro.find(class_='title')
+            if title_elem and title_elem.get_text(strip=True).lower() in ['in this page:', 'on this page:', 'contents:']:
+                # This looks like a table of contents, remove it
+                info_macro.decompose()
+            else:
+                # Keep other information macros as they might contain useful content
+                # Just remove the icon and styling, keep the text content
+                for icon in info_macro.find_all(class_='aui-icon'):
+                    icon.decompose()
+                # Remove the macro wrapper but keep content
+                if info_macro.find(class_='confluence-information-macro-body'):
+                    body = info_macro.find(class_='confluence-information-macro-body')
+                    info_macro.replace_with(body)
+        except Exception as e:
+            print(f"Error processing info macro: {e}")
     
     # Remove empty H1 tags or H1 tags with only styling
     for h1 in soup.find_all('h1'):

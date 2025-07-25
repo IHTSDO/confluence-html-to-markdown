@@ -141,6 +141,55 @@ The `append-content.py` script allows you to:
 
 Perfect for adding feedback forms to your converted Confluence documentation or managing feedback links across large document sets.
 
+### Remove Confluence Links Script
+
+The `remove_confluence_links.py` script is a specialized utility for cleaning up internal Confluence links that may remain in your converted documentation:
+
+**Purpose**: Removes internal Confluence links (pointing to `https://confluence.ihtsdotools.org`) while preserving the link text, making your documentation cleaner and more readable.
+
+**What it does**:
+- Finds Markdown links in the format `[Link Text](https://confluence.ihtsdotools.org/...)`
+- Replaces them with just the link text: `Link Text`
+- Preserves all other links (Wikipedia, external sites, etc.)
+- Processes all `.md` files recursively in the specified directory
+
+**Usage**:
+```bash
+# Basic usage - processes the 'output' directory
+python3 remove_confluence_links.py
+
+# Specify a different directory
+python3 remove_confluence_links.py --directory /path/to/markdown/files
+
+# Dry run to see what would be changed without modifying files
+python3 remove_confluence_links.py --dry-run --verbose
+
+# Verbose output to see detailed processing information
+python3 remove_confluence_links.py --verbose
+```
+
+**Command line options**:
+- `--directory`, `-d`: Directory to process (default: `output`)
+- `--dry-run`, `-n`: Preview changes without modifying files
+- `--verbose`, `-v`: Show detailed output including examples of links being processed
+
+**Example transformation**:
+```markdown
+# Before
+This is an abbreviation for [Augmented Backus-Naur Form](https://confluence.ihtsdotools.org/display/DOCGLOSS/Augmented+Backus-Naur+Form "Glossary link").
+
+# After  
+This is an abbreviation for Augmented Backus-Naur Form.
+```
+
+**Safe operation**:
+- Only removes links pointing to `confluence.ihtsdotools.org`
+- Preserves external links to Wikipedia, RFC documents, and other sites
+- Includes comprehensive error handling and progress reporting
+- Supports dry-run mode for safe testing
+
+This tool is particularly useful after converting Confluence documentation that contains many internal cross-references, helping to create cleaner, more portable documentation.
+
 ## Notes
 
 - External images (URLs starting with http:// or https://) are kept as-is

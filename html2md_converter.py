@@ -31,7 +31,7 @@ def setup_html2text():
     h.ignore_links = False
     h.ignore_images = True  # Tell html2text to ignore image tags, we'll handle them manually
     h.ignore_emphasis = False
-    h.ignore_tables = False
+    h.ignore_tables = True  # Ignore tables since we handle them manually
     h.body_width = 0  # Don't wrap text
     h.unicode_snob = True  # Use Unicode instead of ASCII
     h.wrap_links = False  # Don't wrap links
@@ -240,6 +240,179 @@ def replace_image_placeholders(markdown_content, image_map):
     processed_content = re.sub(r'<figure>.*?</figure>\n----', lambda m: m.group(0).replace('\n----', ''), processed_content, flags=re.DOTALL)
     
     return processed_content
+
+def convert_tables_to_markdown(soup):
+    """Convert HTML tables to markdown tables manually to ensure proper formatting."""
+    for table in soup.find_all('table'):
+        rows = []
+        
+        # Process each row
+        for row in table.find_all('tr'):
+            cells = []
+            row_type = 'data'  # Track if this is a header or data row
+            
+            for cell in row.find_all(['td', 'th']):
+                if cell.name == 'th':
+                    row_type = 'header'
+                    
+                # Get cell text content and clean it up
+                cell_text = cell.get_text(' ', strip=True)
+                # Escape pipe characters
+                cell_text = cell_text.replace('|', '\\|')
+                # Remove excessive whitespace
+                cell_text = ' '.join(cell_text.split())
+                # Handle empty cells
+                if not cell_text:
+                    cell_text = ' '
+                cells.append(cell_text)
+            
+            if cells:  # Only add non-empty rows
+                # Skip rows that contain only separator-like content
+                is_separator_content = all(cell.strip() in ['---', '-', ''] for cell in cells)
+                if not is_separator_content:
+                    rows.append((cells, row_type))
+        
+        if rows:
+            # Determine number of columns from the first row
+            max_cols = max(len(row_data[0]) for row_data in rows) if rows else 0
+            
+            # Pad all rows to have the same number of columns
+            for i, (row, row_type) in enumerate(rows):
+                while len(row) < max_cols:
+                    row.append(' ')
+                rows[i] = (row, row_type)
+            
+            # Create markdown table
+            markdown_lines = []
+            
+            # Find the first header row or use the first row as header
+            header_row = None
+            data_rows = []
+            
+            for row_data, row_type in rows:
+                if row_type == 'header' and header_row is None:
+                    header_row = row_data
+                else:
+                    data_rows.append(row_data)
+            
+            # If no header found, use first row as header
+            if header_row is None and rows:
+                header_row = rows[0][0]
+                data_rows = [row_data for row_data, _ in rows[1:]]
+            
+            if header_row:
+                # Header row
+                header = '| ' + ' | '.join(header_row) + ' |'
+                markdown_lines.append(header)
+                
+                # Separator row
+                separator = '|' + '---|' * max_cols
+                markdown_lines.append(separator)
+                
+                # Data rows
+                for row in data_rows:
+                    data_row = '| ' + ' | '.join(row) + ' |'
+                    markdown_lines.append(data_row)
+            
+            # Replace the table with the markdown version
+            markdown_table = '\n'.join(markdown_lines)
+            
+            # Create a new pre tag to preserve line breaks
+            new_pre = soup.new_tag('pre')
+            new_pre.string = '\n' + markdown_table + '\n'
+            new_pre['data-markdown-table'] = 'true'  # Mark it as a markdown table
+            
+            # Also remove any stray table-related elements around this table
+            parent = table.parent
+            table.replace_with(new_pre)
+            
+            # Clean up any remaining table fragments in the parent
+            if parent:
+                for stray_element in parent.find_all(['td', 'th', 'tr', 'tbody', 'thead', 'tfoot']):
+                    stray_element.decompose()
+    
+    return soup
+
+def escape_pipe_chars_in_tables(soup):
+    """Escape pipe characters in table cell content to prevent markdown table breaking."""
+    for table in soup.find_all('table'):
+        for cell in table.find_all(['td', 'th']):
+            # Process all text content in the cell
+            for text_node in cell.find_all(string=True):
+                if '|' in text_node:
+                    # Replace pipe characters with HTML entity
+                    new_text = text_node.replace('|', '&#124;')
+                    text_node.replace_with(new_text)
+    return soup
+
+def clean_table_cells(soup):
+    """Clean up table cell content to improve markdown conversion."""
+    for table in soup.find_all('table'):
+        for cell in table.find_all(['td', 'th']):
+            # Remove excessive nested divs and wrappers that don't add content
+            for wrapper in cell.find_all(['div'], class_=['content-wrapper']):
+                if wrapper.find('div') or wrapper.find('p') or wrapper.find('ul') or wrapper.find('ol'):
+                    # If the wrapper contains block elements, unwrap it
+                    wrapper.unwrap()
+            
+            # Clean up footnote markers and references
+            for footnote in cell.find_all(['sup']):
+                # Keep the footnote number but remove complex styling
+                if footnote.find('a'):
+                    footnote_text = footnote.get_text(strip=True)
+                    if footnote_text:
+                        footnote.clear()
+                        footnote.string = footnote_text
+            
+            # Clean up status macros (REQUIRED, RECOMMENDED, etc.)
+            for status in cell.find_all(class_=['status-macro']):
+                status_text = status.get_text(strip=True)
+                if status_text:
+                    status.replace_with(f"**{status_text}**")
+            
+            # Remove empty inline spans that don't add content
+            for span in cell.find_all('span'):
+                if not span.get_text(strip=True) and not span.find():
+                    span.decompose()
+                elif span.get('id') and span.get('id').startswith('backref'):
+                    # Remove backref spans which are just for footnote positioning
+                    span.decompose()
+            
+            # Handle complex content in cells by flattening it
+            # Convert block elements to inline with separators
+            for div in cell.find_all('div'):
+                if div.get('style') and 'border-style:solid' in div.get('style'):
+                    # This is likely a code block or example, wrap it properly
+                    div.name = 'pre'
+                    # Remove style attributes to clean it up
+                    if 'style' in div.attrs:
+                        del div['style']
+                else:
+                    # Regular div, unwrap it
+                    div.unwrap()
+            
+            # Convert multiple paragraphs in a cell to a single paragraph with line breaks
+            paragraphs = cell.find_all('p')
+            if len(paragraphs) > 1:
+                # Collect all paragraph content
+                combined_content = []
+                for p in paragraphs:
+                    content = p.get_text(strip=True)
+                    if content:
+                        combined_content.append(content)
+                    p.decompose()
+                
+                # Create a single paragraph with the combined content
+                if combined_content:
+                    new_p = soup.new_tag('p')
+                    new_p.string = ' '.join(combined_content)
+                    cell.append(new_p)
+            
+            # Convert line breaks to spaces in cell content to prevent table breaking
+            for br in cell.find_all('br'):
+                br.replace_with(' ')
+    
+    return soup
 
 def clean_confluence_html(soup):
     """Remove Confluence-specific elements from the HTML."""
@@ -459,6 +632,194 @@ def clean_title(title_text, global_prefix=None):
             return page_title.strip()
     
     return title_text
+
+def restore_markdown_tables(md_content):
+    """Extract markdown tables from code blocks and restore them as proper tables."""
+    # Pattern to find [code] blocks that contain our markdown tables
+    pattern = r'\[code\]\s*\n((?:\s*\|.*\|\s*\n)+)\s*\[/code\]'
+    
+    def replace_table(match):
+        table_content = match.group(1).strip()
+        # Clean up the table lines
+        lines = table_content.split('\n')
+        cleaned_lines = []
+        seen_separator = False
+        
+        for line in lines:
+            line = line.strip()
+            if line.startswith('|') and line.endswith('|'):
+                # Check if this line is a separator row (only contains |, -, and spaces)
+                # This regex matches lines like |---|---| or | --- | --- | etc.
+                # For any number of columns
+                cells = [cell.strip() for cell in line.split('|')[1:-1]]  # Remove first and last empty cells
+                is_separator = all(cell in ['---', '-', ''] or re.match(r'^-+$', cell) for cell in cells if cell.strip())
+                
+                if is_separator:
+                    if not seen_separator:
+                        cleaned_lines.append(line)
+                        seen_separator = True
+                    # Skip additional separator rows (this should catch the | --- | --- | --- | format)
+                else:
+                    cleaned_lines.append(line)
+        
+        return '\n' + '\n'.join(cleaned_lines) + '\n'
+    
+    # Replace code-blocked tables with raw markdown tables
+    md_content = re.sub(pattern, replace_table, md_content, flags=re.MULTILINE)
+    
+    # Also handle ``` style code blocks
+    pattern2 = r'```\s*\n((?:\s*\|.*\|\s*\n)+)\s*```'
+    md_content = re.sub(pattern2, replace_table, md_content, flags=re.MULTILINE)
+    
+    return md_content
+
+def is_table_separator(line):
+    """Check if a line is a markdown table separator."""
+    if not line.startswith('|') or not line.endswith('|'):
+        return False
+    
+    # Split by | and check the content between
+    cells = line.split('|')[1:-1]  # Remove first and last empty parts
+    for cell in cells:
+        cell = cell.strip()
+        if not cell or not re.match(r'^-+$', cell):
+            return False
+    
+    return len(cells) > 0  # Must have at least one cell
+
+def remove_duplicate_table_separators(md_content):
+    """Remove duplicate table separator rows."""
+    lines = md_content.split('\n')
+    cleaned_lines = []
+    i = 0
+    
+    while i < len(lines):
+        line = lines[i]
+        stripped_line = line.strip()
+        
+        # If this line is a table separator, check if the next line is also a separator
+        if stripped_line and is_table_separator(stripped_line):
+            # Add this separator only if we haven't just added one
+            if not cleaned_lines or not is_table_separator(cleaned_lines[-1].strip()):
+                cleaned_lines.append(line)
+            # Skip any consecutive separators
+            j = i + 1
+            while j < len(lines):
+                next_line = lines[j].strip()
+                if next_line and is_table_separator(next_line):
+                    j += 1  # Skip this duplicate separator
+                else:
+                    break
+            i = j - 1  # Will be incremented at the end of the loop
+        else:
+            cleaned_lines.append(line)
+        
+        i += 1
+    
+    return '\n'.join(cleaned_lines)
+
+def fix_markdown_tables(md_content):
+    """Fix markdown table formatting issues."""
+    lines = md_content.split('\n')
+    fixed_lines = []
+    in_table = False
+    table_columns = 0
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        
+        # Detect table header
+        if '|' in line and i + 1 < len(lines) and '---' in lines[i + 1]:
+            # This is the start of a table
+            in_table = True
+            # Count columns from header
+            table_columns = len([cell for cell in line.split('|') if cell.strip()]) if '|' in line else 0
+            
+            # Fix header line
+            line = line.replace('&#124;', '\\|')
+            if line.strip().startswith('|') and line.strip().endswith('|'):
+                fixed_lines.append(line)
+            else:
+                # Ensure proper table structure
+                parts = [part.strip() for part in line.split('|')]
+                if parts and not parts[0]:
+                    parts = parts[1:]  # Remove empty first element
+                if parts and not parts[-1]:
+                    parts = parts[:-1]  # Remove empty last element
+                line = '| ' + ' | '.join(parts) + ' |'
+                fixed_lines.append(line)
+            
+            # Handle separator line
+            i += 1
+            if i < len(lines):
+                separator = lines[i]
+                fixed_lines.append(separator)
+            continue
+        
+        # Check if we're still in a table
+        elif in_table:
+            if line.strip() == '':
+                # Empty line might indicate end of table, but let's be cautious
+                # Look ahead to see if there are more table-like lines
+                next_table_line = False
+                for j in range(i + 1, min(i + 3, len(lines))):
+                    if j < len(lines) and '|' in lines[j] and lines[j].strip():
+                        next_table_line = True
+                        break
+                
+                if not next_table_line:
+                    in_table = False
+                    fixed_lines.append(line)
+                    i += 1
+                    continue
+                else:
+                    # Skip empty lines in tables
+                    i += 1
+                    continue
+            
+            elif '|' in line:
+                # This is a table row
+                line = line.replace('&#124;', '\\|')
+                
+                # Ensure proper table structure
+                parts = [part.strip() for part in line.split('|')]
+                if parts and not parts[0]:
+                    parts = parts[1:]  # Remove empty first element
+                if parts and not parts[-1]:
+                    parts = parts[:-1]  # Remove empty last element
+                
+                # Pad or trim to match table columns
+                while len(parts) < table_columns:
+                    parts.append('')
+                if len(parts) > table_columns:
+                    parts = parts[:table_columns]
+                
+                line = '| ' + ' | '.join(parts) + ' |'
+                fixed_lines.append(line)
+                i += 1
+                continue
+            
+            elif line.strip() and not line.strip().startswith('#'):
+                # Non-table content while in table - might be continuation of previous cell
+                # Try to append to the previous line if it was a table row
+                if fixed_lines and '|' in fixed_lines[-1]:
+                    # Append to the last cell of the previous row
+                    last_line = fixed_lines[-1]
+                    if last_line.strip().endswith('|'):
+                        # Remove the trailing |, add content, then add | back
+                        last_line = last_line.rstrip().rstrip('|').rstrip()
+                        fixed_lines[-1] = last_line + ' ' + line.strip() + ' |'
+                        i += 1
+                        continue
+                
+                # Otherwise, end the table
+                in_table = False
+        
+        fixed_lines.append(line)
+        i += 1
+    
+    return '\n'.join(fixed_lines)
 
 def clean_markdown(md_content):
     """Clean up the markdown output by removing empty headings and other artifacts."""
@@ -751,6 +1112,10 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping
         # Clean Confluence-specific elements
         soup = clean_confluence_html(soup)
         
+        # Clean up table cells and convert tables to markdown manually
+        soup = clean_table_cells(soup)
+        soup = convert_tables_to_markdown(soup)
+        
         # Determine output path and folder depth before processing images
         original_filename = os.path.basename(html_file_path)
         
@@ -790,6 +1155,15 @@ def convert_html_to_markdown(html_file_path, output_dir, rel_path, title_mapping
         
         # Replace image placeholders with actual image HTML
         md_content = replace_image_placeholders(md_content, image_map)
+        
+        # Extract and restore markdown tables from pre blocks
+        md_content = restore_markdown_tables(md_content)
+        
+        # Remove duplicate table separators first
+        md_content = remove_duplicate_table_separators(md_content)
+        
+        # Fix table formatting issues (disabled - custom table conversion should handle this)
+        # md_content = fix_markdown_tables(md_content)
         
         # Clean up the markdown
         md_content = clean_markdown(md_content)

@@ -190,6 +190,96 @@ This is an abbreviation for Augmented Backus-Naur Form.
 
 This tool is particularly useful after converting Confluence documentation that contains many internal cross-references, helping to create cleaner, more portable documentation.
 
+### Frontmatter Management Tool
+
+The `frontmatter_tool.py` script is a utility for managing YAML frontmatter in markdown files, specifically designed for GitBook-style documentation:
+
+**Purpose**: Adds or removes standardized YAML frontmatter from markdown files in bulk, with support for handling multiple copies of the same frontmatter.
+
+**What it does**:
+- Adds GitBook-compatible YAML frontmatter to markdown files
+- Removes existing frontmatter (including multiple copies) from files
+- Processes all `.md` files recursively in specified directories
+- Provides dry-run mode for safe testing
+- Smart detection to avoid unnecessary modifications
+
+**Frontmatter template**:
+```yaml
+---
+layout:
+  width: wide
+  title:
+    visible: true
+  description:
+    visible: true
+  tableOfContents:
+    visible: true
+  outline:
+    visible: true
+  pagination:
+    visible: true
+  metadata:
+    visible: true
+---
+```
+
+**Usage**:
+```bash
+# Add frontmatter to all .md files in a directory
+python3 frontmatter_tool.py --add ./docs
+
+# Remove frontmatter from all .md files in a directory
+python3 frontmatter_tool.py --remove ./output
+
+# See what would be done without making changes
+python3 frontmatter_tool.py --add ./docs --dry-run
+
+# Combine operations (add to one directory, remove from another)
+python3 frontmatter_tool.py --add ./docs --remove ./output
+```
+
+**Command line options**:
+- `--add DIRECTORY`: Add frontmatter to all .md files in the specified directory
+- `--remove DIRECTORY`: Remove frontmatter from all .md files in the specified directory
+- `--dry-run`: Show what would be done without making changes
+
+**Key features**:
+- **Multiple copy handling**: Removes all instances of the same frontmatter from a single file
+- **Smart detection**: Only modifies files that actually need changes
+- **Recursive processing**: Handles subdirectories automatically
+- **Safe operation**: Includes dry-run mode and comprehensive error handling
+- **Progress reporting**: Shows detailed output of what files were modified
+
+**Example transformations**:
+```markdown
+# Before (no frontmatter)
+# My Document
+Content here...
+
+# After adding frontmatter
+---
+layout:
+  width: wide
+  title:
+    visible: true
+  description:
+    visible: true
+  tableOfContents:
+    visible: true
+  outline:
+    visible: true
+  pagination:
+    visible: true
+  metadata:
+    visible: true
+---
+
+# My Document
+Content here...
+```
+
+This tool is essential for preparing markdown documentation for GitBook or other platforms that require specific YAML frontmatter formatting.
+
 ## Notes
 
 - External images (URLs starting with http:// or https://) are kept as-is
